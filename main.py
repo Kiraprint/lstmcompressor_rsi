@@ -1,532 +1,450 @@
 import os
-os.environ['TF_DETERMINISTIC_OPS'] = '1'
-os.environ['TF_CUDNN_DETERMINISM'] = '1'
-# os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
+os.environ["PYTHONHASHSEED"] = "1234"
+os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
+os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
+
 import json
-import tensorflow as tf
-import numpy as np
-import random
 import time
 import math
+import random
 import contextlib
 import hashlib
-
+import torch
+import torch.nn as nn
+import numpy as np
+from contextlib import closing
+import traceback
 from ArithmeticCoder import (
     ArithmeticEncoder,
     ArithmeticDecoder,
     BitOutputStream,
     BitInputStream
 )
+DEFAULT_PARAMS = {
+    "seq_length": 13,
+    "num_layers": 1,
+    "rnn_units": 768,
+    "embedding_size": 150,
+    "start_learning_rate": 0.005,
+    "end_learning_rate": 0.0001,
+    "batch_size": 128
+}
+params = DEFAULT_PARAMS.copy()
+if os.path.exists("params.json"):
+    with open("params.json", "r", encoding="utf-8") as f:
+        params.update(json.load(f))
 
+seq_length = int(params["seq_length"])
+num_layers = int(params["num_layers"])
+rnn_units = int(params["rnn_units"])
+batch_size = int(params["batch_size"])
+embedding_size = int(params["embedding_size"])
+start_learning_rate = float(params["start_learning_rate"])
+end_learning_rate = float(params["end_learning_rate"])
 
-# ==============================
-# Hyperparameters
-# ==============================
-
-# The batch size for training
-batch_size = 140
-seq_length = 2
-rnn_units = 288
-num_layers = 1
-embedding_size = 512
-start_learning_rate = 0.006
-end_learning_rate = 0.0001
-mode = 'both'
-
+mode = "both"
 FREQ_SCALE = 16000000
+SEED = 1234
+
 path_to_file = "data/enwik5"
 path_to_compressed = path_to_file + "_compressed.dat"
 path_to_decompressed = path_to_file + "_decompressed.dat"
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+def reset_seed():
+    random.seed(SEED)
+    np.random.seed(SEED)
+    torch.manual_seed(SEED)
 
-class LearnableTemperature(tf.keras.layers.Layer):
-    """Learnable softmax temperature.
-    Идея из калибровки вероятностей: позволить модели немного менять
-    остроту softmax, но в узких пределах, чтобы не испортить онлайн-обучение.
-    """
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(SEED)
 
-    def __init__(self, min_tau=0.8, max_tau=1.25, **kwargs):
-        super().__init__(**kwargs)
-        self.min_tau = float(min_tau)
-        self.max_tau = float(max_tau)
-        self.log_min = math.log(self.min_tau)
-        self.log_max = math.log(self.max_tau)
+    torch.backends.cudnn.benchmark = False
+    torch.backends.cudnn.deterministic = True
 
-    def build(self, input_shape):
-        self.log_tau = self.add_weight(
-            name='log_tau',
-            shape=(),
-            initializer='zeros',
-            trainable=True
-        )
-        super().build(input_shape)
+    try:
+        torch.use_deterministic_algorithms(True, warn_only=True)
+    except Exception:
+        pass
 
-    def call(self, logits):
-        log_tau = tf.clip_by_value(self.log_tau, self.log_min, self.log_max)
-        tau = tf.exp(log_tau)
-        return logits / tau
+def reset_gpu_memory_stats():
+    if torch.cuda.is_available():
+        torch.cuda.reset_peak_memory_stats()
 
+def get_peak_gpu_memory_gb():
+    if not torch.cuda.is_available():
+        return None
+    try:
+        allocated = torch.cuda.max_memory_allocated()
+        reserved = torch.cuda.max_memory_reserved()
+        return max(allocated, reserved) / (1024.0 ** 3)
+    except Exception:
+        return None
 
-def build_model(vocab_size: int) -> tf.keras.Model:
-    """Builds the model architecture.
+class NeuralByteModel(nn.Module):
+    def __init__(self, vocab_size, embedding_size, rnn_units, num_layers):
+        super().__init__()
 
-    Args:
-        vocab_size: Int, size of the vocabulary.
-    """
-    inputs = [
-        tf.keras.Input(shape=(seq_length,), batch_size=batch_size)
-    ]
+        self.vocab_size = int(vocab_size)
+        self.embedding_size = int(embedding_size)
+        self.rnn_units = int(rnn_units)
+        self.num_layers = int(num_layers)
 
-    # In addition to the primary input, there are also two "state" inputs
-    # for each layer of the network.
-    for _ in range(num_layers):
-        inputs.append(tf.keras.Input(shape=(rnn_units,), batch_size=batch_size))
-        inputs.append(tf.keras.Input(shape=(rnn_units,), batch_size=batch_size))
+        self.embedding = nn.Embedding(self.vocab_size, self.embedding_size)
 
-    embedding = tf.keras.layers.Embedding(
-        vocab_size,
-        embedding_size
-    )(inputs[0])
-
-    # Skip connections will be used to connect each LSTM layer output to the
-    # final output layer. Each LSTM layer will get as input both the original
-    # input and the output of the previous layer.
-    skip_connections = []
-
-    # In addition to the softmax output, there are also two "state" outputs
-    # for each layer of the network.
-    outputs = []
-
-    predictions, state_h, state_c = tf.keras.layers.LSTM(
-        rnn_units,
-        return_sequences=True,
-        return_state=True,
-        recurrent_initializer='glorot_uniform'
-    )(
-        embedding,
-        initial_state=[inputs[1], inputs[2]]
-    )
-
-    skip_connections.append(predictions)
-    outputs.append(state_h)
-    outputs.append(state_c)
-
-    for i in range(num_layers - 1):
-        layer_input = tf.keras.layers.concatenate([embedding, skip_connections[-1]])
-
-        predictions, state_h, state_c = tf.keras.layers.LSTM(
-            rnn_units,
-            return_sequences=True,
-            return_state=True,
-            recurrent_initializer='glorot_uniform'
-        )(
-            layer_input,
-            initial_state=[inputs[i * 2 + 3], inputs[i * 2 + 4]]
+        self.rnn = nn.LSTM(
+            input_size=self.embedding_size,
+            hidden_size=self.rnn_units,
+            num_layers=self.num_layers,
+            batch_first=True,
+            dropout=0.0
         )
 
-        skip_connections.append(predictions)
-        outputs.append(state_h)
-        outputs.append(state_c)
+        self.output = nn.Linear(self.rnn_units, self.vocab_size)
+        self.log_tau = nn.Parameter(torch.zeros(()))
 
-    # The dense output layer only needs to be computed for the last timestep.
-    last_timestep = []
-    for i in range(num_layers):
-        last_timestep.append(
-            tf.keras.layers.Lambda(lambda x: x[:, seq_length - 1, :])(
-                skip_connections[i]
-            )
+    def forward(self, x, hidden):
+        emb = self.embedding(x)
+        out, new_hidden = self.rnn(emb, hidden)
+        last = out[:, -1, :]
+
+        logits = self.output(last)
+
+        log_tau = torch.clamp(
+            self.log_tau,
+            min=math.log(0.9),
+            max=math.log(1.1)
         )
 
-    if num_layers == 1:
-        layer_input = last_timestep[0]
-    else:
-        layer_input = tf.keras.layers.concatenate(last_timestep)
+        tau = torch.exp(log_tau)
+        logits = logits / tau
 
-    logits = tf.keras.layers.Dense(vocab_size, name='dense_logits')(layer_input)
+        return logits, new_hidden
 
-    # Обучаемая температура для калибровки вероятностей.
-    logits = LearnableTemperature(
-        min_tau=0.8,
-        max_tau=1.25,
-        name='learnable_temperature'
-    )(logits)
+    def init_hidden(self, batch_size_value):
+        h = torch.zeros(
+            self.num_layers,
+            batch_size_value,
+            self.rnn_units,
+            device=device
+        )
 
-    output = tf.keras.layers.Activation(
-        'softmax',
-        dtype='float32',
-        name='predictions'
-    )(logits)
+        c = torch.zeros(
+            self.num_layers,
+            batch_size_value,
+            self.rnn_units,
+            device=device
+        )
 
-    outputs.insert(0, output)
+        return h, c
 
-    model = tf.keras.Model(inputs=inputs, outputs=outputs)
-    return model
 
+def detach_hidden(hidden):
+    h, c = hidden
+    return h.detach(), c.detach()
+
+
+def set_learning_rate(optimizer, step, total_steps):
+    total_steps = max(1, int(total_steps))
+    step = min(max(0, int(step)), total_steps)
+
+    progress = float(step) / float(total_steps)
+    lr = end_learning_rate + (start_learning_rate - end_learning_rate) * (1.0 - progress)
+
+    for group in optimizer.param_groups:
+        group["lr"] = lr
+
+    return lr
+
+def make_freqs_from_probs_1d(probs_1d):
+    counts = (probs_1d * float(FREQ_SCALE) + 1.0).astype(np.int64)
+    counts[counts < 1] = 1
+
+    freqs = np.cumsum(counts, dtype=np.int64)
+
+    if freqs[-1] <= 0:
+        freqs = np.arange(1, len(probs_1d) + 1, dtype=np.int64)
+
+    return freqs
+
+def make_uniform_freqs(vocab_size):
+    probs = np.full((int(vocab_size),), 1.0 / float(vocab_size), dtype=np.float64)
+    return make_freqs_from_probs_1d(probs)
 
 def get_symbol(index, length, freq, coder, compress, data):
-    """Runs arithmetic coding and returns the next symbol.
-
-    Args:
-        index: Int, position of the symbol in the file.
-        length: Int, size limit of the file.
-        freq: ndarray, predicted symbol probabilities.
-        coder: this is the arithmetic coder.
-        compress: Boolean, True if compressing, False if decompressing.
-        data: List containing each symbol in the file.
-
-    Returns:
-        The next symbol, or 0 if "index" is over the file size limit.
-    """
     symbol = 0
 
     if index < length:
         if compress:
-            symbol = data[index]
+            symbol = int(data[index])
             coder.write(freq, symbol)
         else:
-            symbol = coder.read(freq)
+            symbol = int(coder.read(freq))
             data[index] = symbol
 
     return symbol
 
-
-def train(pos, seq_input, length, vocab_size, coder, model, optimizer, compress,
-          data, states):
-    """Runs one training step.
-
-    Args:
-        pos: Int, position in the file for the current symbol for the first batch.
-        seq_input: Tensor, containing the last seq_length inputs for the model.
-        length: Int, size limit of the file.
-        vocab_size: Int, size of the vocabulary.
-        coder: this is the arithmetic coder.
-        model: the model to generate predictions.
-        optimizer: optimizer used to train the model.
-        compress: Boolean, True if compressing, False if decompressing.
-        data: List containing each symbol in the file.
-        states: List containing state information for the layers of the model.
-
-    Returns:
-        seq_input: Tensor, containing the last seq_length inputs for the model.
-        cross_entropy: cross entropy numerator.
-        denom: cross entropy denominator.
-    """
+def train_step(pos, seq_input, length, vocab_size, coder, model, optimizer, compress, data, hidden):
     split = math.ceil(length / batch_size)
 
-    with tf.GradientTape() as tape:
-        # The model inputs contain both seq_input and the states for each layer.
-        inputs = states.pop(0)
-        inputs.insert(0, seq_input)
+    model.train()
 
-        # Run the model (for all batches in parallel) to get predictions for the
-        # next characters.
-        outputs = model(inputs)
-        predictions = outputs.pop(0)
+    optimizer.zero_grad(set_to_none=True)
+    set_learning_rate(optimizer, pos, split)
 
-        states.append(outputs)
+    logits, new_hidden = model(seq_input, hidden)
+    probs = torch.softmax(logits, dim=1)
+    probs_np = probs.detach().cpu().numpy()
 
-        p = predictions.numpy()
+    symbols = []
+    mask = []
 
-        # Быстрее считать кумулятивные частоты сразу для всего батча.
-        freqs = np.cumsum(p * FREQ_SCALE + 1, axis=1)
+    for i in range(batch_size):
+        index = pos + 1 + i * split
+        freq = make_freqs_from_probs_1d(probs_np[i])
+        symbol = get_symbol(index, length, freq, coder, compress, data)
 
-        symbols = []
-        mask = []
+        symbols.append(symbol)
 
-        # Go over each batch to run the arithmetic coding and prepare the next
-        # input.
-        for i in range(batch_size):
-            index = pos + 1 + i * split
-            symbol = get_symbol(index, length, freqs[i], coder, compress, data)
-            symbols.append(symbol)
+        if index < length:
+            mask.append(1.0)
+        else:
+            mask.append(0.0)
 
-            if index < length:
-                mask.append(1.0)
-            else:
-                mask.append(0.0)
+    symbols_tensor = torch.tensor(symbols, dtype=torch.long, device=device)
+    mask_tensor = torch.tensor(mask, dtype=torch.float32, device=device)
 
-        symbols_arr = np.array(symbols, dtype=np.int64)
-        mask_arr = np.array(mask, dtype=np.float32)
+    selected_probs = probs.gather(1, symbols_tensor.view(-1, 1)).view(-1)
+    selected_probs = torch.clamp(selected_probs, min=1e-7, max=1.0)
 
-        # For logging.
-        probs_selected = p[np.arange(batch_size), symbols_arr]
-        probs_selected = np.clip(probs_selected, 1e-7, 1.0)
+    loss = torch.sum(-torch.log(selected_probs) * mask_tensor)
+    loss.backward()
 
-        cross_entropy = float(np.sum(np.log2(probs_selected) * mask_arr))
-        denom = int(np.sum(mask_arr))
+    torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=3.0)
+    optimizer.step()
 
-        # Loss without one_hot: take probability of the correct symbol.
-        symbols_tensor = tf.convert_to_tensor(symbols, dtype=tf.int32)
-        mask_tensor = tf.convert_to_tensor(mask, dtype=tf.float32)
+    next_col = symbols_tensor.view(batch_size, 1)
+    seq_input = torch.cat([seq_input[:, 1:], next_col], dim=1).detach()
+    hidden = detach_hidden(new_hidden)
 
-        probs = tf.gather(predictions, symbols_tensor, batch_dims=1)
-        probs = tf.clip_by_value(probs, 1e-7, 1.0)
+    denom = int(mask_tensor.sum().item())
 
-        loss = tf.reduce_sum(-tf.math.log(probs) * mask_tensor)
+    if denom > 0:
+        cross_entropy = float(torch.sum(torch.log2(selected_probs.detach()) * mask_tensor).item())
+    else:
+        cross_entropy = 0.0
 
-        # Remove the oldest input and append the new one.
-        seq_input = tf.slice(
-            seq_input,
-            [0, 1],
-            [batch_size, seq_length - 1]
-        )
-        seq_input = tf.concat(
-            [seq_input, tf.expand_dims(symbols_tensor, 1)],
-            1
-        )
-
-    # Run the backwards pass to update model weights.
-    gradients = tape.gradient(loss, model.trainable_variables)
-
-    # Gradient clipping to make training more robust.
-    capped_grads = []
-    for grad, var in zip(gradients, model.trainable_variables):
-        if grad is None:
-            grad = tf.zeros_like(var)
-        capped_grads.append(tf.clip_by_norm(grad, 4.0))
-
-    optimizer.apply_gradients(zip(capped_grads, model.trainable_variables))
-
-    return seq_input, cross_entropy, denom
-
-
-def reset_seed():
-    """Initializes various random seeds to help with determinism."""
-    SEED = 1234
-
-    os.environ['PYTHONHASHSEED'] = str(SEED)
-
-    random.seed(SEED)
-    np.random.seed(SEED)
-    tf.random.set_seed(SEED)
-
+    return seq_input, hidden, cross_entropy, denom
 
 def process(compress, length, vocab_size, coder, data):
-    """This runs compression/decompression.
-
-    Args:
-        compress: Boolean, True if compressing, False if decompressing.
-        length: Int, size limit of the file.
-        vocab_size: Int, size of the vocabulary.
-        coder: this is the arithmetic coder.
-        data: List containing each symbol in the file.
-    """
-    start = time.time()
-
     reset_seed()
 
-    model = build_model(vocab_size=vocab_size)
-    model.summary()
+    model = NeuralByteModel(
+        vocab_size=vocab_size,
+        embedding_size=embedding_size,
+        rnn_units=rnn_units,
+        num_layers=num_layers
+    ).to(device)
 
-    # Try to split the file into equal size pieces for the different batches.
+    optimizer = torch.optim.Adam(
+        model.parameters(),
+        lr=start_learning_rate,
+        betas=(0.0, 0.9999),
+        eps=1e-5
+    )
+
     split = math.ceil(length / batch_size)
-    lr_decay_steps = max(1, split)
 
-    learning_rate_fn = tf.keras.optimizers.schedules.PolynomialDecay(
-        start_learning_rate,
-        lr_decay_steps,
-        end_learning_rate,
-        power=1.0
-    )
+    uniform_freq = make_uniform_freqs(vocab_size)
 
-    # Возвращаем оригинальный более стабильный beta_2.
-    optimizer = tf.keras.optimizers.Adam(
-        learning_rate=learning_rate_fn,
-        beta_1=0,
-        beta_2=0.9999,
-        epsilon=1e-5
-    )
-
-    # Use a uniform distribution for predicting the first batch of symbols.
-    freq = np.cumsum(
-        np.full(vocab_size, (1.0 / vocab_size)) * FREQ_SCALE + 1
-    )
-
-    # Construct the first set of input characters for training.
     symbols = []
+
     for i in range(batch_size):
-        symbols.append(
-            get_symbol(i * split, length, freq, coder, compress, data)
-        )
+        index = i * split
+        symbol = get_symbol(index, length, uniform_freq, coder, compress, data)
+        symbols.append(symbol)
 
-    # Replicate the input tensor seq_length times, to match the input format.
-    seq_input = tf.tile(
-        tf.expand_dims(symbols, 1),
-        [1, seq_length]
-    )
+    seq_input = torch.tensor(symbols, dtype=torch.long, device=device).view(batch_size, 1)
+    seq_input = seq_input.repeat(1, seq_length)
 
-    pos = cross_entropy = denom = 0
+    hidden = model.init_hidden(batch_size)
 
-    # This will keep track of layer states. Initialize them to zeros.
-    states = []
-    for _ in range(seq_length):
-        states.append(
-            [tf.zeros([batch_size, rnn_units]) for _ in range(num_layers * 2)]
-        )
+    pos = 0
+    cross_entropy = 0.0
+    denom = 0
 
-    # Keep repeating the training step until we get to the end of the file.
     while pos < split:
-        seq_input, ce, d = train(
-            pos,
-            seq_input,
-            length,
-            vocab_size,
-            coder,
-            model,
-            optimizer,
-            compress,
-            data,
-            states
+        seq_input, hidden, ce, d = train_step(
+            pos=pos,
+            seq_input=seq_input,
+            length=length,
+            vocab_size=vocab_size,
+            coder=coder,
+            model=model,
+            optimizer=optimizer,
+            compress=compress,
+            data=data,
+            hidden=hidden
         )
 
         cross_entropy += ce
         denom += d
         pos += 1
 
-        if pos % 5 == 0:
-            percentage = 100 * pos / split
-
-            if percentage >= 100:
-                continue
-
-            print(
-                '\rProgress: %.2f%%, Cross entropy: %.2f, Time = %i' % (
-                    percentage,
-                    -cross_entropy / denom,
-                    time.time() - start
-                ),
-                end=''
-            )
-
     if compress:
         coder.finish()
 
-    print('\n')
-
-
 def compression():
-    text = open(path_to_file, 'rb').read()
+    raw = open(path_to_file, "rb").read()
+    vocab = sorted(set(raw))
 
-    vocab = sorted(set(text))
-
-    # Используем реальный размер словаря.
-    # Если уникальных байтов нет, берём 1, чтобы модель могла работать.
     vocab_size = max(1, len(vocab))
 
-    # Creating a mapping from unique characters to indexes.
-    char2idx = {u: i for i, u in enumerate(vocab)}
+    char2idx = {b: i for i, b in enumerate(vocab)}
+    int_list = [char2idx[b] for b in raw]
 
-    int_list = [char2idx[c] for c in text]
+    length = len(int_list)
 
-    file_len = len(int_list)
+    with open(path_to_compressed, "wb") as out:
+        out.write(length.to_bytes(5, byteorder="big", signed=False))
 
-    print('Length of file: {} symbols'.format(file_len))
-    print('Vocabulary size: {}'.format(vocab_size))
+        with closing(BitOutputStream(out)) as bitout:
+            vocab_set = set(vocab)
 
-    with open(path_to_compressed, "wb") as out, \
-         contextlib.closing(BitOutputStream(out)) as bitout:
+            for i in range(256):
+                bitout.write(1 if i in vocab_set else 0)
 
-        length = len(int_list)
+            encoder = ArithmeticEncoder(32, bitout)
 
-        # Write the original file length to the compressed file header.
-        out.write(length.to_bytes(5, byteorder='big', signed=False))
-
-        # Write 256 bits to the compressed file header to keep track
-        # of the vocabulary.
-        for i in range(256):
-            if i in char2idx:
-                bitout.write(1)
-            else:
-                bitout.write(0)
-
-        enc = ArithmeticEncoder(32, bitout)
-
-        process(
-            True,
-            length,
-            vocab_size,
-            enc,
-            int_list
-        )
-
-
-# Compatibility alias for the original typo.
-compession = compression
-
+            process(
+                compress=True,
+                length=length,
+                vocab_size=vocab_size,
+                coder=encoder,
+                data=int_list
+            )
 
 def decompression():
-    with open(path_to_compressed, "rb") as inp, \
-         open(path_to_decompressed, "wb") as out:
+    with open(path_to_compressed, "rb") as inp:
+        length = int.from_bytes(inp.read(5), byteorder="big", signed=False)
 
-        # Read the original file size from the header.
-        length = int.from_bytes(inp.read(5), byteorder='big')
+        with open(path_to_decompressed, "wb") as out:
+            with closing(BitInputStream(inp)) as bitin:
+                vocab = []
 
-        # Create a list to store the file characters.
-        output = [0] * length
+                for i in range(256):
+                    bit = bitin.read()
 
-        bitin = BitInputStream(inp)
+                    if bit == 1:
+                        vocab.append(i)
 
-        # Get the vocabulary from the file header.
-        vocab = []
-        for i in range(256):
-            if bitin.read():
-                vocab.append(i)
+                vocab_size = max(1, len(vocab))
+                output = [0] * length
 
-        # Используем реальный размер словаря.
-        vocab_size = max(1, len(vocab))
+                decoder = ArithmeticDecoder(32, bitin)
 
-        dec = ArithmeticDecoder(32, bitin)
+                process(
+                    compress=False,
+                    length=length,
+                    vocab_size=vocab_size,
+                    coder=decoder,
+                    data=output
+                )
 
-        process(
-            False,
-            length,
-            vocab_size,
-            dec,
-            output
-        )
+                idx2char = np.array(vocab, dtype=np.uint8)
 
-        # Convert indexes back to the original characters.
-        idx2char = np.array(vocab)
+                for i in range(length):
+                    out.write(bytes((int(idx2char[output[i]]),)))
 
-        for i in range(length):
-            out.write(bytes((idx2char[output[i]],)))
+
+def md5_file(path):
+    h = hashlib.md5()
+
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            h.update(chunk)
+
+    return h.hexdigest()
+
+def write_result(success, compression_ratio=None, time_spent=None, error=None, peak_gpu_memory_gb=None):
+    result = {
+        "success": bool(success),
+        "compression_ratio": compression_ratio,
+        "time_spent": round(float(time_spent), 2) if time_spent is not None else None,
+        "peak_gpu_memory_gb": round(float(peak_gpu_memory_gb), 4) if peak_gpu_memory_gb is not None else None
+    }
+
+    if error is not None:
+        result["error"] = str(error)
+
+    with open("results.json", "w", encoding="utf-8") as f:
+        json.dump(result, f, indent=4)
 
 
 def main():
     start = time.time()
 
-    if mode == 'compress' or mode == 'both':
-        compression()
+    try:
+        reset_seed()
+        reset_gpu_memory_stats()
 
-        print(f"Original size: {os.path.getsize(path_to_file)} bytes")
-        print(f"Compressed size: {os.path.getsize(path_to_compressed)} bytes")
+        if mode == "compress" or mode == "both":
+            print('Encoding started')
+            compression()
 
-    if mode == 'decompress' or mode == 'both':
-        decompression()
+        if mode == "decompress" or mode == "both":
+            print('Decoding started')
+            decompression()
 
-        hash_dec = hashlib.md5(open(path_to_decompressed, 'rb').read()).hexdigest()
-        hash_orig = hashlib.md5(open(path_to_file, 'rb').read()).hexdigest()
+        hash_dec = md5_file(path_to_decompressed)
+        hash_orig = md5_file(path_to_file)
 
-        assert hash_dec == hash_orig
+        if hash_dec != hash_orig:
+            raise RuntimeError("MD5 mismatch after decompression")
 
-    if os.path.exists(path_to_file) and os.path.exists(path_to_compressed):
         original_size = os.path.getsize(path_to_file)
         compressed_size = os.path.getsize(path_to_compressed)
 
-        if compressed_size > 0:
-            print('Compression ratio: %.2f' % (original_size / compressed_size))
+        if compressed_size <= 0:
+            raise RuntimeError("Compressed file is empty")
+
+        compression_ratio = original_size / compressed_size
+        elapsed = time.time() - start
+        peak_gpu_memory_gb = get_peak_gpu_memory_gb()
+
+        if peak_gpu_memory_gb is None:
+            gpu_mem_text = "N/A (CPU)"
         else:
-            print('Compression ratio: inf')
+            gpu_mem_text = f"{peak_gpu_memory_gb:.2f} GB"
 
-    print('Time spent: %i' % (time.time() - start))
+        print(f'Compression ratio: {compression_ratio:.2f}, Time: {elapsed:.2f}, GPU memory: {gpu_mem_text}')
+      
+        write_result(
+            success=True,
+            compression_ratio=round(float(compression_ratio), 4),
+            time_spent=elapsed,
+            peak_gpu_memory_gb=peak_gpu_memory_gb
+        )
 
+    except Exception as e:
+        elapsed = time.time() - start
 
-    result = {
-        "compression_ratio": round(original_size / compressed_size, 2) if compressed_size > 0 else None,
-        "time_spent": round(time.time() - start, 2)
-    }
-    with open("results.json", "w") as f:
-        json.dump(result, f, indent=4)
+        write_result(
+            success=False,
+            compression_ratio=None,
+            time_spent=elapsed,
+            error=str(e),
+            peak_gpu_memory_gb=get_peak_gpu_memory_gb()
+        )
 
-if __name__ == '__main__':
+        raise
+
+if __name__ == "__main__":
+    #import faulthandler
+    #faulthandler.enable(open("faulthandler.log", "w"))
+
+    #try:
     main()
+    #except Exception:
+    #    traceback.print_exc()
+    #    raise
