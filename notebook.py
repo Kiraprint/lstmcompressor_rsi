@@ -360,6 +360,39 @@ def _(base_bytes, baseline, pd):
 def _(mo):
     mo.md(
         r"""
+        ## 7b. LLM-prior direction (arXiv:2407.07723)
+
+        The literature suggested by the course replaces the online neural net with a
+        frozen LLM. `llm_codec.py` / `llm_codec_fast.py` implement this: GPT-2 byte-level
+        BPE (reversible via UTF-8 surrogateescape) tokens are arithmetic-coded using
+        GPT-2 next-token probabilities over the full 50 257-token vocabulary.
+
+        **Key trick:** 1000-token segments are independent (fresh KV cache each), so all
+        27 segments are advanced in *one GPU batch* in lockstep. This cuts per-token cost
+        about 20x with bit-identical probabilities, bringing full-file encode+decode from
+        170.6 s (sequential) to **28.7 s** (13.1 + 15.5). Result on enwik5:
+
+        | version | bytes | ratio | time |
+        |---|---|---|---|
+        | baseline (GPU) | 33276 | 3.0052 | 27.0 s |
+        | online LSTM+Muon | 32087 | 3.1165 | 26.3 s |
+        | GPT-2 prior, batched | **14249** | **7.018** | **28.7 s** |
+
+        Byte-identical roundtrip (MD5 verified), inside the +50% time budget, over 2x the
+        +10% ratio target. Caveats: the model is an external prior (not in the bitstream)
+        and was pretrained on web/Wikipedia-like data; for `enwik5` this means partial
+        memorization, though held-out enwik8 chunks still give 0.83-0.87 bpb (ratio ~9-10).
+
+        Run: `.venv/bin/python -c "from llm_codec_fast import LLMCodecFast as C; d=open('data/enwik5','rb').read(); c=C(); r=c.compress(d); print(len(d)/len(r['frame']), c.decompress(r['frame'])['data']==d)"`
+        """
+    )
+    return
+
+
+@app.cell
+def _(mo):
+    mo.md(
+        r"""
         ## 8. Reproduce
 
         ```bash

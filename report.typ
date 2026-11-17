@@ -98,6 +98,7 @@ comparison on the same GPU.
   [D LSTM Muon n48 s32], [100000], [32153], [3.110], [24.5], [24.6], [49.1],
   [E LSTM Muon n80 s32 cosine FINAL], [100000], [32087], [3.116], [13.1], [13.2], [26.3],
   [F GDN Muon n48 s32], [100000], [34198], [2.924], [241.4], [241.4], [482.8],
+  [G LLM GPT2 prior fast], [100000], [14249], [7.018], [13.1], [15.5], [28.7],
 )
 
 #figure(image("figs/pareto.png", width: 78%), caption: "Compression ratio versus total encode+decode time.") #v(2mm)
@@ -121,6 +122,24 @@ The slot memory did not improve the ratio further; the text simply does not cont
 enough long-range repeated structure for 32 explicit prototypes to pay off. This is a
 negative result worth reporting: on larger or more repetitive files the trade-off can
 reverse.
+
+== LLM prior (literature direction, arXiv:2407.07723)
+
+As a direction suggested by the course literature we replaced the online neural
+expert by a frozen GPT-2 language model and arithmetic-coded GPT-2 byte-level
+BPE tokens. The model is an *external* prior (not stored in the bitstream).
+The 1000-token segments are *independent* (fresh KV cache each), so all 27
+segments are predicted in a single GPU batch advanced in lockstep: this cut the
+per-token cost ~20× with no change to the coded probabilities. The full codec —
+frozen model logits feeding the same Nayuki arithmetic coder, tokenizer `gpt2`
+with UTF-8 surrogateescape for arbitrary bytes — roundtrips enwik5
+byte-identically (MD5-verified) at 14 249 bytes, ratio 7.02, in 13.1 s encode +
+15.5 s decode = 28.7 s total, *inside* the +50 % time budget and far beyond the
++10 % ratio target. The speedup over the sequential per-token codec (86.6 +
+84.0 = 170.6 s) is pure parallelization: the batched probabilities are bit-identical.
+Because the model is external and not shipped in the bitstream, and because it
+was pre-trained on Wikipedia-like text, this variant is reported separately from
+the fully self-contained online LSTM solution above.
 
 == Reproduction
 
