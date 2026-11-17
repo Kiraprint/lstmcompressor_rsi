@@ -6,3 +6,6 @@ pandas
 transformers
 tokenizers
 huggingface_hub
+nbformat
+nbconvert
+playwright

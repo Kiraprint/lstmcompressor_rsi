@@ -27,14 +27,14 @@ def row(r, label):
 
 
 rows = ",\n  ".join([
-    f"[Baseline, reference LSTM], [{N}], [{ref_bytes}], [{ref_ratio:.3f}], [—], [—], [{ref_time:.1f}]",
+    f"[Бейзлайн, эталонный LSTM], [{N}], [{ref_bytes}], [{ref_ratio:.3f}], [—], [—], [{ref_time:.1f}]",
 ] + [row(r, r["name"].replace("_", " ")) for r in res
      if r["name"] != "baseline_reference"])
 
 figs = ""
-for f, cap in [("pareto.png", "Compression ratio versus total encode+decode time."),
-               ("curve.png", "Online convergence of the model on enwik5."),
-               ("bars.png", "Compressed file size.")]:
+for f, cap in [("pareto.png", "Коэффициент сжатия от суммарного времени кодирования и декодирования."),
+               ("curve.png", "Онлайновая сходимость модели на enwik5."),
+               ("bars.png", "Размер сжатого файла.")]:
     if (R / "figs" / f).exists():
         figs += (f'#figure(image("figs/{f}", width: 78%), caption: "{cap}") '
                  f'#v(2mm)\n')
@@ -45,180 +45,187 @@ md = f'''#set page(paper: "a4", margin: (x: 1.9cm, y: 1.7cm))
 #show heading.where(level: 1): set text(size: 15pt, weight: "bold")
 
 #align(center)[
-  #text(size: 17pt, weight: "bold")[Neural text compression with online context mixing\
-    and linear-attention reference memories]
+  #text(size: 17pt, weight: "bold")[Нейросжатие текста: онлайн-смешивание контекстов\
+    и линейное внимание с векторами-эталонами]
   #v(3mm)
-  #text(size: 10pt)[Laboratory work — auto-regressive compression of enwik5\
-    (ITMO University, CT Lab)]
+  #text(size: 10pt)[Лабораторная работа — авторегрессионное сжатие enwik5\
+    (ИТМО, CT Lab)]
 ]
 
 #v(4mm)
-*Student:* Федорин Кирилл Вячеславович (Fedorin Kirill), group М4145  \
-*Instructor:* E. A. Belyaev (eabelyaev\@itmo.ru) \
-*Source repository:* https\://github.com/Kiraprint/lstmcompressor_rsi  \
-*Original task:* https\://ctlab.itmo.ru/gitlab/eabelyaev/lstmcompressor  \
-*Project:* `lstmcompressor_rsi/` (marimo notebook `notebook.py`, run `bash run.sh`)
+*Студент:* Федорин Кирилл Вячеславович, группа М4145  \
+*Преподаватель:* Е. А. Беляев (eabelyaev\@itmo.ru) \
+*Репозиторий:* https\://github.com/Kiraprint/lstmcompressor_rsi  \
+*Исходная задача:* https\://ctlab.itmo.ru/gitlab/eabelyaev/lstmcompressor  \
+*Проект:* `lstmcompressor_rsi/` (ноутбук marimo `notebook.py`, запуск `bash run.sh`)
 
-== Summary
+== Краткое содержание
 
-The baseline byte-LSTM + adaptive arithmetic coder was replaced by a *frozen
-GPT-2 prior* driving the same arithmetic coder: the file is tokenised with GPT-2
-byte-level BPE (reversible for arbitrary bytes), and each token is coded with the
-model's next-token probability. The GPT-2 weights and tokenizer are fixed
-constants of the codec — they are not derived from the input file, so no
-input-dependent hyperparameter is left outside the bitstream. All experiments
-were performed on the same RTX 5090 GPU. The best verified configuration achieved
-*{best["ratio"]:.3f}×* compression ({best["bytes"]} bytes), i.e. {gain:+.1f}%
-relative to the GPU baseline ({ref_ratio:.3f}×), with only {over:+.1f}% total-time
-overhead. A fully self-contained variant — an online LSTM + Muon codec that
-learns from the file itself and ships no external parameters — is also reported
-below ({'3.117'}×, +3.7%).
+Базовая версия (байтовый LSTM + адаптивный арифметический кодер) заменена
+*замороженным GPT-2 приором*, работающим с тем же арифметическим кодером: файл
+разбивается на токены байтовым BPE GPT-2 (обратимо для произвольных байтов), и
+каждый токен кодируется вероятностью следующего токена модели. Веса GPT-2 и
+токенизатор — фиксированные константы кодека, они не получаются из входного
+файла, поэтому ни один зависящий от файла гиперпараметр не остаётся вне
+битового потока. Все эксперименты выполнены на одной и той же GPU RTX 5090.
+Лучшая проверенная конфигурация дала коэффициент *{best["ratio"]:.3f}×*
+({best["bytes"]} байт), то есть {gain:+.1f}% относительно GPU-бейзлайна
+({ref_ratio:.3f}×), при накладных расходах по времени всего {over:+.1f}%.
+Полностью самодостаточный вариант — онлайн LSTM + Muon, обучающийся по самому
+файлу и не передающий внешних параметров, — также приведён ниже
+({'3.117'}×, +3.7%).
 
-== Formal setting
+== Постановка
 
-For a byte sequence $x_1 … x_N$ an auto-regressive model assigns
+Для байтовой последовательности $x_1 … x_N$ авторегрессионная модель задаёт
 
 $ p(x_1 … x_N) = product_(t=1)^N p_theta(x_t | x_(<t)), $
 
-and an arithmetic coder spends $L = -log_2 p(x_1…x_N) = sum_t -log_2 p_theta(x_t|x_(<t))$ bits.
-The encoder updates $theta$ after every symbol; the decoder repeats the same SGD trajectory
-on decoded bytes, so *model parameters never enter the bitstream* — only the file length,
-the byte alphabet (256-bit mask) and the hyper-parameters.
+а арифметический кодер тратит $L = -log_2 p(x_1…x_N) = sum_t -log_2 p_theta(x_t|x_(<t))$ бит.
+Кодер обновляет $theta$ после каждого символа; декодер повторяет ту же траекторию SGD
+по уже декодированным байтам, поэтому *параметры модели никогда не попадают в поток* —
+только длина файла, байтовый алфавит (256-битная маска) и гиперпараметры.
 
-=== Context mixing
+=== Смешивание контекстов
 
-The neural distribution $p_N N$ is combined with $K$ statistical experts
-$ p_1 … p_K$ by a geometric mixture with simplex weights:
+Нейросетевое распределение $p_N N$ комбинируется с $K$ статистическими экспертами
+$ p_1 … p_K$ геометрической смесью с весами на симплексе:
 
 $ log p(s) = sum_(j=0)^K a_j log p_j (s), quad a = op("softmax")(u), quad sum_j a_j = 1. $
 
-Here expert 0 is the neural net, experts $1…5$ are order-$k$ online byte models
-(\$k in {1,2,3,4,6}\$) with Krichevsky--Trofimov-style smoothing
+Здесь эксперт 0 — нейросеть, эксперты $1…5$ — онлайн байтовые модели порядка $k$
+(\$k in {{1,2,3,4,6}}\$) со сглаживанием в духе Кричевского—Трофимова
 
 $ p_k (s | c) = (c(s) + alpha) / (n(c) + alpha V), quad alpha = 0.35, $
 
-and the last expert is an LZP match model predicting the continuation of the longest
-verified previous suffix. Weights are adapted online by gradient descent on the coding
-loss:
+а последний эксперт — LZP-модель совпадений, предсказывающая продолжение самого
+длинного проверенного предыдущего суффикса. Веса подстраиваются онлайн
+градиентным спуском по потере кодирования:
 
 $ (∂ (-log p(s)))/(∂ u_j) = a_j ( log p_j (s) - E_p [log p_j] ), quad u ← u - eta nabla u. $
 
-Restricting $a$ to the simplex is essential. An earlier variant
-$log p = log p_N N + w dot "corr"$ let weights grow unbounded; because order models are strong
-in *absolute* terms rather than as deviations from the net, this double counted their
-probability and degraded the result by about 20%. A neural-dominant initialisation
-$u_0 = 4$ also proved important: with uniform initial weights the weak order-1/LZP experts
-diluted the net early in the file.
+Ограничение $a$ симплексом принципиально. Более ранний вариант
+$log p = log p_N N + w dot "corr"$ позволял весам расти неограниченно; поскольку
+модели порядка сильны в *абсолютном* смысле, а не как отклонения от сети, это
+дважды учитывало их вероятность и ухудшало результат примерно на 20%.
+Инициализация с доминированием сети $u_0 = 4$ тоже оказалась важна: при
+равномерных начальных весах слабые эксперты порядка 1/LZP размывали сеть в
+начале файла.
 
-=== Linear attention and reference-vector memories
+=== Линейное внимание и память из векторов-эталонов
 
-A softmax attention head was replaced by a *gated linear attention* (GLA) state
-$ S_t in RR^(d_v times d_k) $:
+Голова softmax-внимания заменена на состояние *гейтового линейного внимания*
+(GLA) $ S_t in RR^(d_v times d_k) $:
 
 $ S_t = a_t S_(t-1) + k_t v_t^T, quad a_t = sigma(-"gate"(e_t)) in (0, 1), quad o_t = S_t^T q_t. $
 
-Each column of $S_t$ is a learned reference vector spanning past values; reading
-$o_t$ reconstructs context by querying that matrix. The GDN-2 variant equips the memory
-with an *erase* operation (the gated delta rule):
+Каждый столбец $S_t$ — выученный вектор-эталон, натянутый на прошлые значения;
+чтение $o_t$ восстанавливает контекст запросом к этой матрице. Вариант GDN-2
+наделяет память операцией *стирания* (гейтовое дельта-правило):
 
 $ S_t = (I - beta_t k_t k_t^T) a_t S_(t-1) + beta_t v_t k_t^T, quad beta_t in (0, 1). $
 
-Without the erase term a stale association can only disappear through decay; with it the
-model can overwrite one reference direction in a single step. The `*_slots` variants add a
-second, explicitly addressed memory
+Без члена стирания устаревшая ассоциация может исчезнуть только через затухание;
+с ним модель перезаписывает одно направление-эталон за один шаг. Варианты
+`*_slots` добавляют вторую, явно адресуемую память
 
 $ M_t = γ_t M_(t-1) + w_t v_t^T, quad w_t = op("softmax")(W_w e_t), quad M_t in RR^(N times d), $
 
-so the predictor can read from both the dense decaying memory $S_t$ and a small set of
-$N$ prototypes. Both memories are deterministic functions of the already-decoded prefix,
-hence lossless reconstruction requires no side information.
+так что предиктор читает и из плотной затухающей памяти $S_t$, и из небольшого
+набора из $N$ прототипов. Обе памяти — детерминированные функции уже
+декодированного префикса, поэтому для точного восстановления не нужно побочной
+информации.
 
-== Experiments
+== Эксперименты
 
-All variants were tested on `data/enwik5` (100 000 bytes, 155 distinct bytes).
-Compression ratios and times below were obtained by full encode + decode + byte-wise
-comparison on the same GPU.
+Все варианты проверены на `data/enwik5` (100 000 байт, 155 различных байтов).
+Коэффициенты и времена ниже получены полным кодированием + декодированием +
+побайтовым сравнением на одной GPU.
 
 #table(
   columns: (auto, auto, auto, auto, auto, auto, auto),
   inset: 3pt,
-  [*Version*], [*Original*], [*Compressed*], [*Ratio*], [*Enc, s*], [*Dec, s*], [*Total, s*],
+  [*Версия*], [*Исходный*], [*Сжатый*], [*Коэфф.*], [*Код, с*], [*Дек, с*], [*Сумма, с*],
   {rows},
 )
 
 {figs}
 
-== Discussion
+== Обсуждение
 
-For the *self-contained* online LSTM codec (no external parameters), the gain over
-the reference recipe comes from training dynamics, not from extra modules. Against
-the reference (Adam, lr stuck at 5e-3, single-gradient step) three changes jointly
-cut the bits-per-byte curve:
+Для *самодостаточного* онлайн LSTM-кодека (без внешних параметров) выигрыш
+относительно эталонного рецепта даёт динамика обучения, а не дополнительные
+модули. Относительно эталона (Adam, lr зафиксирован на 5e-3, один шаг градиента)
+три изменения совместно снижают кривую бит-на-байт:
 
-1. **Correct per-step learning-rate schedule.** The reference defined a cosine-like
-   schedule but never applied it (lr stayed pinned at 5e-3). Applying a cosine decay
-   from 5e-3 to 1e-4 lets the online model anneal instead of oscillating late in the
-   file; without it the curve flattens about 0.15 bits/byte above the achievable mark.
-2. **Muon on the recurrent weight matrices.** Orthogonalising the LSTM cell matrices
-   (Newton-Schulz step, per-matrix scale sqrt(fan_out/fan_in)) stabilises and
-   accelerates online learning; a Muon-scale sweep gave a monotone gain up to scale 4.
-3. **Longer BPTT window and fewer streams.** seq_len 32 (vs 13) and n_streams 80 give
-   each SGD step more context and more updates per byte; the (n, seq) trade was swept
-   and n80/s32 was the fastest point inside the time budget.
+1. *Корректное расписание скорости обучения по шагам.* Эталон задавал
+   косинусное расписание, но никогда его не применял (lr оставался 5e-3).
+   Косинусное убывание от 5e-3 до 1e-4 позволяет онлайн-модели «отжигаться»
+   вместо колебаний в конце файла; без него кривая выходит на плато примерно на
+   0.15 бит/байт выше достижимого.
+2. *Muon на рекуррентных весовых матрицах.* Ортогонализация матриц ячейки LSTM
+   (шаг Ньютона—Шульца, покомпонентный масштаб sqrt(fan_out/fan_in)) стабилизирует
+   и ускоряет онлайн-обучение; перебор масштаба Muon дал монотонный выигрыш
+   вплоть до масштаба 4.
+3. *Более длинное окно BPTT и меньше потоков.* seq_len 32 (вместо 13) и
+   n_streams 80 дают каждому шагу SGD больше контекста и больше обновлений на
+   байт; компромисс (n, seq) перебирался, и n80/s32 оказался самой быстрой точкой
+   внутри бюджета времени.
 
-A statistical context-mixer was also implemented (geometric mixture of the NN with
-shared order-1..6 count models) and gives a small complementary gain when initialised
-NN-dominant, but the shipped final config runs with the mixer *disabled*: once Muon
-plus the correct LR schedule were in place, the mixer's marginal contribution shrank
-to ~60 bytes and it was switched off to stay within the time budget.
+Также был реализован статистический смеситель контекстов (геометрическая смесь
+сети с общими моделями счёта порядка 1..6); он даёт небольшой дополнительный
+выигрыш при инициализации с доминированием сети, но итоговая конфигурация
+работает с *выключенным* смесителем: после появления Muon и корректного
+расписания LR вклад смесителя упал примерно до 60 байт, и его отключили, чтобы
+уложиться в бюджет времени.
 
-The linear-attention cores successfully reproduce the byte distribution (≈2.84 bits/byte
-with GLA/GDN-2 at 512 hidden units, versus ≈2.74 for the 768-unit LSTM) but at higher
-wall-clock cost: their matrix state and the unrolled delta rule are more expensive per
-step on this small file, where 100 000 symbols are too few to amortise the overhead.
-The slot memory did not improve the ratio further; the text simply does not contain
-enough long-range repeated structure for 32 explicit prototypes to pay off. This is a
-negative result worth reporting: on larger or more repetitive files the trade-off can
-reverse.
+Ядра линейного внимания успешно воспроизводят байтовое распределение (≈2.84
+бит/байт у GLA/GDN-2 при 512 скрытых единицах против ≈2.74 у LSTM на 768), но
+дороже по времени: их матричное состояние и развёрнутое дельта-правило дороже на
+шаг на этом малом файле, где 100 000 символов слишком мало, чтобы окупить
+накладные расходы. Память слотов не улучшила коэффициент дальше; в тексте просто
+недостаточно дальнодействующей повторяющейся структуры, чтобы 32 явных прототипа
+окупились. Это отрицательный результат, который стоит привести: на больших или
+более повторяющихся файлах компромисс может развернуться.
 
-== Primary result: GPT-2 prior codec (arXiv:2407.07723, bellard.org/nncp)
+== Основной результат: кодек с GPT-2 приором (arXiv:2407.07723, bellard.org/nncp)
 
-This is the headline solution. The online neural expert is replaced by a *frozen*
-GPT-2 language model and the arithmetic coder operates on GPT-2 byte-level BPE
-tokens. The GPT-2 weights and tokenizer are *fixed constants of the algorithm*,
-exactly like the arithmetic coder or the network architecture: they are installed
-once with the codec and are identical for encoder and decoder. They are **not**
-obtained by preprocessing the input file, so the task requirement ("every
-input-dependent hyperparameter must be embedded in the bitstream") is satisfied —
-the bitstream carries only the file length and token count. The tokenizer is
-byte-level and reversible for *arbitrary* bytes (Latin-1 bridge, all 256 byte
-values roundtrip), so the codec is valid for an unknown file type.
+Это головное решение. Онлайновый нейросетевой эксперт заменён *замороженной*
+языковой моделью GPT-2, а арифметический кодер работает с токенами байтового BPE
+GPT-2. Веса GPT-2 и токенизатор — *фиксированные константы алгоритма*, ровно как
+арифметический кодер или архитектура сети: они ставятся один раз вместе с
+кодеком и одинаковы для кодера и декодера. Они *не* получаются предобработкой
+входного файла, поэтому требование задачи («каждый зависящий от файла
+гиперпараметр должен быть в битовом потоке») выполнено — в потоке только длина
+файла и число токенов. Токенизатор байтовый и обратим для *произвольных* байтов
+(Latin-1, все 256 значений проходят), поэтому кодек корректен для неизвестного
+типа файла.
 
-The 1000-token segments are *independent* (fresh KV cache each), so all 27
-segments are predicted in a single GPU batch advanced in lockstep: this cut the
-per-token cost ~20× with no change to the coded probabilities. The full codec
-roundtrips enwik5 byte-identically (MD5-verified) at 14 249 bytes, ratio 7.018,
-in 13.1 s encode + 15.5 s decode = 28.7 s total — only +6.3 % over the 27.0 s
-baseline and far beyond the +10 % ratio target (+133 %). The speedup over the
-sequential per-token codec (86.6 + 84.0 = 170.6 s) is pure parallelization: the
-batched code computes the same per-token probabilities (frames differ by a single
-flush-aligning byte, 14 249 vs 14 250).
+Сегменты по 1000 токенов *независимы* (свой KV-кэш у каждого), поэтому все 27
+сегментов предсказываются одним GPU-батчем в ножницах: это снизило стоимость на
+токен примерно в 20 раз без изменения кодируемых вероятностей. Полный кодек
+восстанавливает enwik5 байт-в-байт (MD5 совпадает) при 14 249 байтах, коэффициент
+7.018, за 13.1 с кодирования + 15.5 с декодирования = 28.7 с суммарно — это всего
+на 6.3 % больше 27.0 с бейзлайна и далеко за целью +10 % по коэффициенту (+133 %).
+Ускорение относительно последовательного кодека (86.6 + 84.0 = 170.6 с) — чистая
+параллелизация: батчевый вариант считает те же вероятности на токен (кадры
+отличаются на один байт выравнивания, 14 249 против 14 250).
 
-*Contamination check.* GPT-2 was pre-trained on web/Wikipedia text, so enwik5 may
-be partly memorised (teacher-forced bpb 0.749). On held-out enwik8 chunks (50 MB
-and 90 MB offsets, almost certainly unseen) the same codec gives 0.83 and 0.87
-bits/byte, i.e. ratio 9.2–9.7 — still ~3× the baseline, so the result is robust
-to contamination.
+*Проверка на контаминацию.* GPT-2 предобучен на веб/вики-тексте, поэтому enwik5
+может быть частично заучен (teacher-forced 0.749 бит/байт). На отложенных
+фрагментах enwik8 (смещения 50 МБ и 90 МБ, почти наверняка не виденных) тот же
+кодек даёт 0.83 и 0.87 бит/байт, то есть коэффициент 9.2–9.7 — по-прежнему
+примерно в 3 раза выше бейзлайна, так что результат устойчив к контаминации.
 
-== Self-contained variant: online LSTM + Muon
+== Самодостаточный вариант: онлайн LSTM + Muon
 
-For completeness, a codec that ships *no* external parameters — it retrains an
-LSTM online from the file being coded — reaches ratio 3.117 (+3.7 %) in 26.3 s.
-This is the strict "all parameters learned from the stream" solution; the GPT-2
-codec above is ~2.3× better on size at a comparable time, at the cost of a fixed
-external prior.
+Для полноты: кодек, который *не* передаёт внешних параметров — он дообучает LSTM
+онлайн по самому сжимаемому файлу, — даёт коэффициент 3.117 (+3.7 %) за 26.3 с.
+Это строгое решение «все параметры выучены из потока»; кодек с GPT-2 выше
+примерно в 2.3 раза лучше по размеру при сопоставимом времени, ценой
+фиксированного внешнего приора.
 
-== Reproduction
+== Воспроизведение
 
 ```bash
 uv venv --python 3.12 .venv
@@ -228,8 +235,8 @@ uv pip install --python .venv/bin/python marimo matplotlib pandas
 .venv/bin/python -m codec.cli --config config.json
 ```
 
-The unmodified reference is preserved in `bench_baseline/`; its result file contains the
-baseline timing used above.
+Неизменённый эталон сохранён в `bench_baseline/`; его файл результата содержит
+использованное выше время бейзлайна.
 '''
 
 (R / "report.typ").write_text(md)

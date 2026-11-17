@@ -87,10 +87,22 @@ uv pip install --python .venv -r requirements.txt
 # 2. сжать + распаковать + сверка MD5 (config.json — итоговая конфигурация)
 .venv/bin/python -m codec.cli --config config.json --input data/enwik5
 
-# 3. маримо-ноутбук (интерактивно или headless-экспорт)
+# 3. маримо-ноутбук анализа (интерактивно)
 .venv/bin/marimo edit notebook.py
+
+# 4. отчёт (PDF, русский) и презентация (слайды из marimo-ноутбука)
+.venv/bin/python make_figs.py && .venv/bin/python make_report.py   # -> report.pdf
+bash make_pres.sh                                                  # -> presentation.pdf
+.venv/bin/marimo edit presentation.py                              # преза интерактивно
 ```
 
-Итоговая конфигурация: `arch=lstm, n_streams=80, seq_len=32, hidden=768, emb=150,
-optimizer=muon, muon_lr_scale=4.0, sched=cosine, freq_scale=16000000`.
-Отчёт в PDF собирается как `make_figs.py && make_report.py → report.pdf`.
+Итоговая конфигурация онлайн-кодека: `arch=lstm, n_streams=80, seq_len=32,
+hidden=768, emb=150, optimizer=muon, muon_lr_scale=4.0, sched=cosine,
+freq_scale=16000000`.
+
+Деливераблы:
+
+- `report.pdf` — отчёт на русском (`make_report.py` → typst).
+- `presentation.pdf` — презентация-слайды, собранная из marimo-ноутбука
+  `presentation.py` (`marimo export pdf ... --as=slides`); 13 слайдов.
+- `notebook.py` — ноутбук анализа (формулы, абляции, графики).
