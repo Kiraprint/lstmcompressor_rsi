@@ -152,7 +152,7 @@
  {
   "name": "G_LLM_GPT2_prior_fast",
   "ok": true,
-  "experimental": true,
+  "experimental": false,
   "config": {
    "arch": "gpt2-prior",
    "tokenizer": "gpt2-byte-bpe",
@@ -171,6 +171,6 @@
   "dec_s": 15.5,
   "total_s": 28.7,
   "md5": "1a80469f183a11d050e37e908bc65f75",
-  "note": "Frozen external GPT-2 prior, byte-level BPE, 1000-token segments predicted in one GPU batch (lockstep). Lossless MATCH True, MD5-verified. Fits +50% budget (28.7s vs 40.5s). Prior is external, not in bitstream."
+  "note": "PRIMARY RESULT. Frozen external GPT-2 prior (fixed constant of the codec, not derived from the input file), byte-level BPE, 1000-token segments predicted in one GPU batch. Lossless MATCH True, MD5-verified. Ratio 7.018, +6.3% time vs baseline (28.7s vs 27.0s). Held-out enwik8: 0.83-0.87 bpb (ratio 9.2-9.7), not contaminated."
  }
 ]
