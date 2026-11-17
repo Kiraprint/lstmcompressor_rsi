@@ -71,10 +71,15 @@ GPT-2 как внешний приор. Токены — обратимый ба
 `codec/mixer.py`, оптимизатор `codec/optim.py`, поток `codec/core.py`, CLI `codec/cli.py`).
 
 ```bash
+# 0. одна команда: окружение + зависимости + сжатие + распаковка + сверка MD5
+bash run.sh                       # онлайн LSTM+Muon (основное решение)
+bash run.sh data/enwik5 --llm     # LLM-приор GPT-2 (направление из литературы)
+
+# или вручную:
 # 1. окружение
 uv venv --python 3.12 .venv
 uv pip install --python .venv torch --index-url https://download.pytorch.org/whl/cu128
-uv pip install --python .venv numpy numpy<2.4 marimo matplotlib pandas
+uv pip install --python .venv -r requirements.txt
 
 # 2. сжать + распаковать + сверка MD5 (config.json — итоговая конфигурация)
 .venv/bin/python -m codec.cli --config config.json --input data/enwik5

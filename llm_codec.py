@@ -48,7 +48,7 @@ class LLMCodecSeg:
         return torch.softmax(out.logits[0,-1].float(),dim=-1), out.past_key_values
 
     def compress(self, data: bytes):
-        ids=self.tk.encode(data.decode('utf8', errors='surrogateescape')).ids
+        ids=self.tk.encode(data.decode('latin1')).ids
         out=io.BytesIO(); enc=ArithmeticEncoder(32,BitOutputStream(out))
         bits=0.0; t0=time.time()
         N=len(ids)
@@ -80,5 +80,5 @@ class LLMCodecSeg:
                     p,past=self._step(part[-1],past); cu=cumfreq(p)
                 k=dec.read(GpuFreq(cu)); part.append(k)
             ids.extend(part)
-        data=self.tk.decode(ids).encode('utf8', errors='surrogateescape')[:length]
+        data=self.tk.decode(ids).encode('latin1')[:length]
         return {'data':data,'ntok':len(ids),'decode_s':time.time()-t0}

@@ -3,3 +3,6 @@ numpy<2.4
 marimo
 matplotlib
 pandas
+transformers
+tokenizers
+huggingface_hub

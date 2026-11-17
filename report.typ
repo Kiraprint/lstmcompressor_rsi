@@ -91,7 +91,6 @@ comparison on the same GPU.
   inset: 3pt,
   [*Version*], [*Original*], [*Compressed*], [*Ratio*], [*Enc, s*], [*Dec, s*], [*Total, s*],
   [Baseline, reference LSTM], [100000], [33276], [3.005], [—], [—], [27.0],
-  [baseline reference], [100000], [33276], [3.005], [—], [—], [27.0],
   [A LSTM Adam n128 s13], [100000], [33388], [2.995], [11.0], [11.1], [22.1],
   [B LSTM Adam n48 s32], [100000], [33074], [3.023], [20.8], [20.9], [41.7],
   [C LSTM Muon n128 s32], [100000], [33386], [2.995], [4.0], [4.0], [8.0],
@@ -108,11 +107,26 @@ comparison on the same GPU.
 
 == Discussion
 
-The main gain comes from the *statistical* mixture early in each stream: for the first
-several hundred bytes the order-2 model (3.7 bits/byte with shared statistics) is far
-ahead of an untrained LSTM, and the learned mixture weights smoothly transfer probability
-mass to the neural expert as its loss falls. Longer BPTT windows (32 instead of 13) give
-an additional small improvement because each SGD step then sees more context.
+The headline improvement comes from *training dynamics*, not from extra modules.
+Against the reference recipe (Adam, lr stuck at 5e-3, single-gradient step) three
+changes jointly cut the bits-per-byte curve:
+
+1. **Correct per-step learning-rate schedule.** The reference defined a cosine-like
+   schedule but never applied it (lr stayed pinned at 5e-3). Applying a cosine decay
+   from 5e-3 to 1e-4 lets the online model anneal instead of oscillating late in the
+   file; without it the curve flattens about 0.15 bits/byte above the achievable mark.
+2. **Muon on the recurrent weight matrices.** Orthogonalising the LSTM cell matrices
+   (Newton-Schulz step, per-matrix scale sqrt(fan_out/fan_in)) stabilises and
+   accelerates online learning; a Muon-scale sweep gave a monotone gain up to scale 4.
+3. **Longer BPTT window and fewer streams.** seq_len 32 (vs 13) and n_streams 80 give
+   each SGD step more context and more updates per byte; the (n, seq) trade was swept
+   and n80/s32 was the fastest point inside the time budget.
+
+A statistical context-mixer was also implemented (geometric mixture of the NN with
+shared order-1..6 count models) and gives a small complementary gain when initialised
+NN-dominant, but the shipped final config runs with the mixer *disabled*: once Muon
+plus the correct LR schedule were in place, the mixer's marginal contribution shrank
+to ~60 bytes and it was switched off to stay within the time budget.
 
 The linear-attention cores successfully reproduce the byte distribution (≈2.84 bits/byte
 with GLA/GDN-2 at 512 hidden units, versus ≈2.74 for the 768-unit LSTM) but at higher
@@ -136,10 +150,17 @@ with UTF-8 surrogateescape for arbitrary bytes — roundtrips enwik5
 byte-identically (MD5-verified) at 14 249 bytes, ratio 7.02, in 13.1 s encode +
 15.5 s decode = 28.7 s total, *inside* the +50 % time budget and far beyond the
 +10 % ratio target. The speedup over the sequential per-token codec (86.6 +
-84.0 = 170.6 s) is pure parallelization: the batched probabilities are bit-identical.
+84.0 = 170.6 s) is pure parallelization: the batched code computes the same per-token
+probabilities (the coded frames differ by a single flush-aligning byte, 14 249 vs 14 250).
 Because the model is external and not shipped in the bitstream, and because it
 was pre-trained on Wikipedia-like text, this variant is reported separately from
-the fully self-contained online LSTM solution above.
+the fully self-contained online LSTM solution above. The task requires a codec
+that works for an *unknown* file type with every input-dependent hyperparameter
+embedded in the bitstream; the online LSTM retrains itself from the file being
+coded and transmits no external parameters, so it is the headline solution. The
+frozen LLM is a fixed, file-independent prior: legitimate as the literature
+direction the course points to, but not a drop-in replacement under the
+bitstream self-containment requirement.
 
 == Reproduction
 

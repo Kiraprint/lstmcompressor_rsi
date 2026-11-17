@@ -16,4 +16,21 @@ command -v uv >/dev/null || { echo "нужен uv: https://docs.astral.sh/uv"; e
 .venv/bin/python -c "import numpy, marimo, matplotlib, pandas" 2>/dev/null \
   || uv pip install --python .venv -r requirements.txt
 # 4) прогон: сжатие + распаковка + сверка MD5
-.venv/bin/python -m codec.cli --config config.json --input "$SRC"
+if [ "${2:-}" = "--llm" ]; then
+  .venv/bin/python -c "import transformers, tokenizers, huggingface_hub" 2>/dev/null \
+    || uv pip install --python .venv transformers tokenizers huggingface_hub
+  .venv/bin/python - "$SRC" <<'PY'
+import sys, hashlib
+from llm_codec_fast import LLMCodecFast
+data = open(sys.argv[1], 'rb').read()
+c = LLMCodecFast(); r = c.compress(data)
+out = c.decompress(r['frame'])['data']
+md5 = hashlib.md5(data).hexdigest()
+print(f"LLM codec: {len(data)} -> {len(r['frame'])} bytes, "
+      f"ratio {len(data)/len(r['frame']):.4f}, "
+      f"enc {r['encode_s']:.1f}s, md5 {md5}, "
+      f"MATCH {out == data}")
+PY
+else
+  .venv/bin/python -m codec.cli --config config.json --input "$SRC"
+fi

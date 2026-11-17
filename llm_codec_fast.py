@@ -48,7 +48,7 @@ class LLMCodecFast:
 
     def compress(self, data: bytes):
         t0 = time.time()
-        ids = self.tk.encode(data.decode('utf8', errors='surrogateescape')).ids
+        ids = self.tk.encode(data.decode('latin1')).ids
         cfs, segs = self._precompute(ids)
         out = io.BytesIO(); enc = ArithmeticEncoder(32, BitOutputStream(out))
         bits = 0.0
@@ -97,5 +97,5 @@ class LLMCodecFast:
                 if pos < seg_lens[b]:
                     parts[b].append(dec.read(GpuFreq(rows[b])))
         ids = [t for part in parts for t in part]
-        data = self.tk.decode(ids).encode('utf8', errors='surrogateescape')[:length]
+        data = self.tk.decode(ids).encode('latin1')[:length]
         return {'data': data, 'ntok': len(ids), 'decode_s': time.time()-t0}

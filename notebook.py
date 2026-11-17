@@ -369,7 +369,7 @@ def _(mo):
 
         **Key trick:** 1000-token segments are independent (fresh KV cache each), so all
         27 segments are advanced in *one GPU batch* in lockstep. This cuts per-token cost
-        about 20x with bit-identical probabilities, bringing full-file encode+decode from
+        about 20x with equivalent per-token probabilities (1 flush-align byte difference), bringing full-file encode+decode from
         170.6 s (sequential) to **28.7 s** (13.1 + 15.5). Result on enwik5:
 
         | version | bytes | ratio | time |
