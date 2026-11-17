@@ -48,6 +48,7 @@ class Config:
     mixer: bool = True
     orders: Tuple[int, ...] = (1, 2, 3, 4, 6)
     mix_lr: float = 0.02
+    mix_init: float = 4.0        # initial log-weight in favour of the neural expert
     mix_decay: float = 1.0        # count decay per update (1.0 = none)
     count_prior: float = 0.35     # additive smoothing per symbol
     sse: bool = False             # secondary symbol estimation stage
