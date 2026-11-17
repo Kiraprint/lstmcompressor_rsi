@@ -10,7 +10,7 @@
 ]
 
 #v(4mm)
-*Student:* Kirill  *Instructor:* E. A. Belyaev (eabelyaev\@itmo.ru) *Source:* https\://ctlab.itmo.ru/gitlab/eabelyaev/lstmcompressor  *Project:* `lstmcompressor_rsi/` (marimo notebook `notebook.py`)
+*Student:* Федорин Кирилл Вячеславович (Fedorin Kirill), group М4145  *Instructor:* E. A. Belyaev (eabelyaev\@itmo.ru) *Source repository:* https\://github.com/Kiraprint/lstmcompressor_rsi  *Original task:* https\://ctlab.itmo.ru/gitlab/eabelyaev/lstmcompressor  *Project:* `lstmcompressor_rsi/` (marimo notebook `notebook.py`, run `bash run.sh`)
 
 == Summary
 

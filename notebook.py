@@ -395,6 +395,8 @@ def _(mo):
         r"""
         ## 8. Reproduce
 
+        Source repository: https://github.com/Kiraprint/lstmcompressor_rsi
+
         ```bash
         uv venv --python 3.12 .venv
         uv pip install --python .venv/bin/python torch --index-url https://download.pytorch.org/whl/cu128

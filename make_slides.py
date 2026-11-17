@@ -226,6 +226,8 @@ surrogateescape). Логиты модели идут в тот же арифме
 Оговорки: GPT-2 предобучен на веб/вики-тексте, приор внешний (не в битстриме).""")
 
 slides.append(f"""= Воспроизведение
+Исходный код проекта: https://github.com/Kiraprint/lstmcompressor_rsi
+
 Окружение создаётся через `uv venv` (сборка torch под CUDA):
 
 #block(fill: luma(245), inset: 10pt, radius: 4pt)[

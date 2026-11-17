@@ -52,10 +52,11 @@ md = f'''#set page(paper: "a4", margin: (x: 1.9cm, y: 1.7cm))
 ]
 
 #v(4mm)
-*Student:* Kirill  \
+*Student:* Федорин Кирилл Вячеславович (Fedorin Kirill), group М4145  \
 *Instructor:* E. A. Belyaev (eabelyaev\@itmo.ru) \
-*Source:* https\://ctlab.itmo.ru/gitlab/eabelyaev/lstmcompressor  \
-*Project:* `lstmcompressor_rsi/` (marimo notebook `notebook.py`)
+*Source repository:* https\://github.com/Kiraprint/lstmcompressor_rsi  \
+*Original task:* https\://ctlab.itmo.ru/gitlab/eabelyaev/lstmcompressor  \
+*Project:* `lstmcompressor_rsi/` (marimo notebook `notebook.py`, run `bash run.sh`)
 
 == Summary
 

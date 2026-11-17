@@ -207,6 +207,8 @@ surrogateescape). Логиты модели идут в тот же арифме
 
 #pagebreak()
 = Воспроизведение
+Исходный код проекта: https://github.com/Kiraprint/lstmcompressor_rsi
+
 Окружение создаётся через `uv venv` (сборка torch под CUDA):
 
 #block(fill: luma(245), inset: 10pt, radius: 4pt)[
