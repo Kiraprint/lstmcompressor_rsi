@@ -1,0 +1,22 @@
+{
+  "arch": "lstm",
+  "n_streams": 80,
+  "seq_len": 32,
+  "hidden": 768,
+  "emb": 150,
+  "layers": 1,
+  "device": "cuda",
+  "freq_scale": 16000000,
+  "mixer": false,
+  "optimizer": "muon",
+  "muon_lr_scale": 4.0,
+  "sched": "cosine",
+  "lr": 0.005,
+  "lr_end": 0.0001,
+  "seed": 1234,
+  "beta1": 0.0,
+  "beta2": 0.9999,
+  "eps": 1e-05,
+  "clip": 3.0,
+  "weight_decay": 0.0
+}
