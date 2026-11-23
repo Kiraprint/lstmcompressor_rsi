@@ -228,7 +228,7 @@ uv venv --python 3.12 .venv
 uv pip install --python .venv torch --index-url https://download.pytorch.org/whl/cu128
 uv pip install --python .venv -r requirements.txt
 uv run --python .venv python -m codec.cli --config config.json --input data/enwik5
-```)
+```
 ]
 Итоговая конфигурация: `arch=lstm, n_streams=80, seq_len=32, hidden=768, emb=150,
 optimizer=muon, muon_lr_scale=4.0, sched=cosine`.

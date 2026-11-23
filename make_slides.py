@@ -244,7 +244,7 @@ slides.append(f"""= Воспроизведение
 #set text(size: 7.5pt)
 ```bash
 {run_cmd}
-```)
+```
 ]
 Итоговая конфигурация: `arch=lstm, n_streams=80, seq_len=32, hidden=768, emb=150,
 optimizer=muon, muon_lr_scale=4.0, sched=cosine`.
