@@ -90,10 +90,9 @@ uv pip install --python .venv -r requirements.txt
 # 3. маримо-ноутбук анализа (интерактивно)
 .venv/bin/marimo edit notebook.py
 
-# 4. отчёт (PDF, русский) и презентация (слайды из marimo-ноутбука)
+# 4. отчёт и презентация (PDF, русский; typst)
 .venv/bin/python make_figs.py && .venv/bin/python make_report.py   # -> report.pdf
-bash make_pres.sh                                                  # -> presentation.pdf
-.venv/bin/marimo edit presentation.py                              # преза интерактивно
+.venv/bin/python make_slides.py && typst compile slides.typ slides.pdf  # -> slides.pdf
 ```
 
 Итоговая конфигурация онлайн-кодека: `arch=lstm, n_streams=80, seq_len=32,
@@ -103,6 +102,5 @@ freq_scale=16000000`.
 Деливераблы:
 
 - `report.pdf` — отчёт на русском (`make_report.py` → typst).
-- `presentation.pdf` — презентация-слайды, собранная из marimo-ноутбука
-  `presentation.py` (`marimo export pdf ... --as=slides`); 13 слайдов.
-- `notebook.py` — ноутбук анализа (формулы, абляции, графики).
+- `slides.pdf` — презентация, 13 слайдов 16:9 (`make_slides.py` → typst).
+- `notebook.py` — marimo-ноутбук анализа (формулы, абляции, графики).
