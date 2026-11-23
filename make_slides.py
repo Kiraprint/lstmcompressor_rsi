@@ -11,7 +11,42 @@ by = {r["name"]: r for r in res}
 base = by["baseline_reference"]
 best = next(r for r in res if r["name"].endswith("FINAL"))
 N = 100000
-gain = (best["ratio"] / base["ratio"] - 1) * 100
+gain = (by["G_LLM_GPT2_prior_fast"]["ratio"] / base["ratio"] - 1) * 100
+
+_ts = R / "timing_stats.json"
+tstats = json.loads(_ts.read_text()) if _ts.exists() else {}
+_meta = tstats.get("_meta", {})
+
+
+def med(name, fallback):
+    return tstats.get(name, {}).get("median_total_s", fallback)
+
+
+def rng(name):
+    st = tstats.get(name)
+    if not st:
+        return ""
+    return f"{st['min_total_s']:.1f}–{st['max_total_s']:.1f}"
+
+
+gpt = by["G_LLM_GPT2_prior_fast"]
+g_med = med("G_LLM_GPT2_prior_fast", gpt["total_s"])
+e_med = med("E_LSTM_Muon_n80_s32_cosine_FINAL", base["total_s"])
+b_med = med("baseline", base["total_s"])
+g_over = (g_med / b_med - 1) * 100 if b_med else 0.0
+g_gr = gpt["ratio"] / base["ratio"]
+_lstm = next(r for r in res if r["name"].endswith("FINAL"))
+e_ratio, e_bytes = _lstm["ratio"], _lstm["bytes"]
+e_gain = (e_ratio / base["ratio"] - 1) * 100
+if tstats:
+    _sp = max(v["spread_pct"] for k, v in tstats.items() if not k.startswith("_"))
+    _bm = tstats["baseline"]["median_total_s"]
+    proto = (f"Время — медиана 3 изолированных прогонов; разброс между прогонами "
+             f"до {_sp:.0f} % (хост делится GPU с другим процессом). "
+             f"Бейзлайн: медиана {_bm:.1f} с, бюджет +50 % = "
+             f"{tstats['_meta']['budget_50pct_s']:.1f} с.")
+else:
+    proto = ""
 
 
 def code(path: str, a: int, b: int) -> str:
@@ -34,8 +69,8 @@ def table(head, rows):
 base_tbl = table(
     ["Версия", "Исходный, Б", "Сжатый, Б", "Коэфф.", "Суммарно, с"],
     [["Baseline (main.py)", "100 000", "33 276", "3.0052", "27.0"],
-     ["*Предложенная (GPT-2 приор)*", "100 000", "*14 249*", "*7.018*", "*28.7*"],
-     ["LSTM+Muon (self-contained)", "100 000", "32 087", "3.1165", "26.3"]])
+     ["*Предложенная (GPT-2 приор)*", "100 000", "*14 249*", f"*{gpt['ratio']:.3f}*", f"*{g_med:.1f}*"],
+     ["LSTM+Muon (self-contained)", "100 000", f"{e_bytes}", f"{e_ratio:.4f}", f"{e_med:.1f}"]])
 
 abl_tbl = table(
     ["Вариант", "Байт", "Коэфф.", "Время, с"],
@@ -43,11 +78,12 @@ abl_tbl = table(
      ["B. LSTM + Adam, окно 32", "33 074", "3.0235", "41.7"],
      ["C. LSTM + Muon, окно 32", "33 386", "2.9953", "8.0"],
      ["D. LSTM + Muon, n=48", "32 153", "3.1101", "49.1"],
-     ["*E. LSTM + Muon, n=80, cos (финал)*", "*32 087*", "*3.1165*", "*26.3*"],
+     ["*E. LSTM + Muon, n=80, cos (финал)*", f"*{e_bytes}*", f"*{e_ratio:.4f}*", f"*{e_med:.1f}*"],
      ["F. GDN-2 (линейное внимание)", "34 198", "2.9241", "482.8"]])
 
-fig_pareto_90 = ('#figure(image("figs/pareto.png", width: 90%), '
-              'caption: "Коэффициент vs время: все прогоны и зум на бюджет")')
+fig_pareto_90 = ('#figure(image("figs/pareto.png", height: 9.1cm), '
+              'caption: "Все прогоны (лог. время) и зум на укладывающиеся в бюджет; '
+              'A–F — строки абляционной таблицы")')
 fig_curve = 'figure(image("figs/curve.png", width: 100%), caption: "Кривая обучения")'
 fig_bars = 'figure(image("figs/bars.png", width: 100%), caption: "Размер после сжатия")'
 
@@ -92,9 +128,10 @@ slides.append(f"""= Задача
 #v(0.5em)
 #block(fill: luma(238), inset: 12pt, radius: 5pt)[
 *Результат на этом устройстве (RTX 5090):* GPT-2-приор — коэффициент
-*3.0052 → 7.018* (в 2.3× базового, +133 %), время *27.0 → 28.7 с* (в бюджете
-+50 %). Self-contained LSTM+Muon — *3.1165* (+3.7 %), 26.3 с. Обе версии
-восстанавливают байт-в-байт (MD5 совпадает).
+*{base["ratio"]:.4f} → {gpt["ratio"]:.3f}* (в {g_gr:.2f}× базового, {gain:+.1f} %),
+время *{b_med:.1f} → {g_med:.1f} с*. Self-contained LSTM+Muon —
+*{e_ratio:.4f}* ({e_gain:+.1f} %), {e_med:.1f} с. Обе версии восстанавливают
+байт-в-байт (MD5 совпадает).
 ]""")
 
 slides.append(f"""= Как работает кодек
@@ -177,12 +214,11 @@ slides.append(f"""= Результаты
 Формат потока `NSCC1`: 5 байт длины + 32 байта маски алфавита + 12×4 байта
 гиперпараметров + 16 байт имени архитектуры + арифметически закодированные данные.
 
-Все параметры, зависящие от файла, лежат в заголовке → тип файла знать не нужно.""")
+Все параметры, зависящие от файла, лежат в заголовке → тип файла знать не нужно.
+
+{proto}""")
 
 slides.append(f"""= Коэффициент против времени
-Слева — все прогоны (время логарифмически), справа — зум на укладывающиеся в бюджет.
-Пунктир — бейзлайн 3.005, зелёная — цель +10 % (3.306), оранжевая — бюджет 40.5 с.
-
 {fig_pareto_90}""")
 
 slides.append(f"""= Сходимость и размер файла
@@ -207,7 +243,7 @@ $
 архитектура интересна, но на 100 КБ не окупается. Лучший онлайн-результат —
 *LSTM+Muon*; абсолютный — *GPT-2 приор* (следующий слайд).""")
 
-slides.append("""= Финальное решение: GPT-2 приор
+slides.append(f"""= Финальное решение: GPT-2 приор
 
 Вместо онлайновой сети — *замороженный* GPT-2 как приор
 (arXiv:2407.07723, bellard.org/nncp). Токены — обратимый байтовый BPE
@@ -224,13 +260,15 @@ slides.append("""= Финальное решение: GPT-2 приор
   columns: (1.5fr, 1fr, 1fr, 1fr),
   inset: 3pt,
   [*Метод*], [*Байт*], [*Коэфф.*], [*Время (с)*],
-  [Базовый (RTX 5090)], [33 276], [3.0052], [27.0],
-  [*GPT-2 приор (батч)*], [*14 249*], [*7.018*], [*28.7*],
-  [LSTM+Muon (self-contained)], [32 087], [3.1165], [26.3],
+  [Базовый (RTX 5090)], [33 276], [{base["ratio"]:.4f}], [{b_med:.1f}],
+  [*GPT-2 приор (батч)*], [*14 249*], [*{gpt["ratio"]:.3f}*], [*{g_med:.1f}*],
+  [LSTM+Muon (self-contained)], [{e_bytes}], [{e_ratio:.4f}], [{e_med:.1f}],
 )
 #set text(size: 12.5pt)
-Байт-в-байт (MD5 совпал): *7.018* — в 2.3× выше базового (+133 %), в 2× выше
-цели +10 %; время 28.7 с — в бюджете +50 % (+6.3 %). Модель и токенизатор —
+Байт-в-байт (MD5 совпал): *{gpt["ratio"]:.3f}* — в {g_gr:.2f}× выше базового
+({gain:+.1f} %), в {gpt["ratio"] / (base["ratio"] * 1.1):.1f}× выше цели +10 %;
+время {g_med:.1f} с при бюджете +50 % = {b_med * 1.5:.1f} с ({g_over:+.1f} %).
+Модель и токенизатор —
 *фиксированные константы алгоритма*, не получены из входного файла → правило
 «параметры предобработки файла в потоке» выполнено (в потоке только длина и
 число токенов). На held-out enwik8 (не контаминирован) ratio 9.2–9.7.""")
@@ -251,12 +289,12 @@ optimizer=muon, muon_lr_scale=4.0, sched=cosine`.
 
 Ноутбук `notebook.py` (marimo) — формулы, код, абляции и графики.""")
 
-slides.append(f"""#v(3.0cm)
+slides.append(f"""#v(2.2cm)
 #align(center)[
 #text(size: 24pt, weight: "bold")[Спасибо за внимание] \\
-#v(0.9em)
-#text(size: 15pt)[*Финальное решение — GPT-2-приор: 7.018* (в 2.3× базового, +133 %), 28.7 с. \\
-Self-contained LSTM+Muon: *3.1165* (+3.7 %), 26.3 с. \\
+#v(0.8em)
+#text(size: 14pt)[*GPT-2-приор: {gpt["ratio"]:.3f}* (×{g_gr:.2f}, {gain:+.1f} %), {g_med:.1f} с — финальное решение. \\
+Self-contained LSTM+Muon: *{e_ratio:.4f}* ({e_gain:+.1f} %), {e_med:.1f} с. \\
 Восстановление байт-в-байт (MD5).] \\
 #v(1.2em)
 #text(size: 13pt, fill: gray)[Федорин Кирилл Вячеславович · М4145 · eabelyaev\\@itmo.ru]

@@ -1,176 +1,182 @@
 [
- {
-  "name": "baseline_reference",
-  "ok": true,
-  "bytes": 33276,
-  "ratio": 3.0052,
-  "enc_s": null,
-  "dec_s": null,
-  "total_s": 26.99,
-  "bpb": 2.6619,
-  "arch": "lstm_ref",
-  "curve": [
-   [
-    0,
-    7.2789
-   ],
-   [
-    128,
-    3.7919
-   ],
-   [
-    256,
-    3.3227
-   ],
-   [
-    384,
-    3.0678
-   ],
-   [
-    512,
-    2.9107
-   ],
-   [
-    640,
-    2.7765
-   ],
-   [
-    768,
-    2.6619
-   ]
-  ]
- },
- {
-  "name": "A_LSTM_Adam_n128_s13",
-  "ok": true,
-  "bytes": 33388,
-  "ratio": 2.9951,
-  "enc_s": 11.0,
-  "dec_s": 11.1,
-  "total_s": 22.1,
-  "bpb": 2.6533,
-  "arch": "lstm"
- },
- {
-  "name": "B_LSTM_Adam_n48_s32",
-  "ok": true,
-  "bytes": 33074,
-  "ratio": 3.0235,
-  "enc_s": 20.8,
-  "dec_s": 20.9,
-  "total_s": 41.7,
-  "bpb": 2.6444,
-  "arch": "lstm"
- },
- {
-  "name": "C_LSTM_Muon_n128_s32",
-  "ok": true,
-  "bytes": 33386,
-  "ratio": 2.9953,
-  "enc_s": 4.0,
-  "dec_s": 4.0,
-  "total_s": 8.0,
-  "bpb": 2.575,
-  "arch": "lstm"
- },
- {
-  "name": "D_LSTM_Muon_n48_s32",
-  "ok": true,
-  "bytes": 32153,
-  "ratio": 3.1101,
-  "enc_s": 24.5,
-  "dec_s": 24.6,
-  "total_s": 49.1,
-  "bpb": 2.5466,
-  "arch": "lstm"
- },
- {
-  "name": "E_LSTM_Muon_n80_s32_cosine_FINAL",
-  "ok": true,
-  "bytes": 32087,
-  "ratio": 3.1165,
-  "enc_s": 13.1,
-  "dec_s": 13.2,
-  "total_s": 26.3,
-  "bpb": 2.555,
-  "arch": "lstm",
-  "curve": [
-   [
-    0,
-    7.291105187196072
-   ],
-   [
-    128,
-    3.9805175768249375
-   ],
-   [
-    256,
-    3.515678423907843
-   ],
-   [
-    384,
-    3.274094075673941
-   ],
-   [
-    512,
-    3.0817240518084597
-   ],
-   [
-    640,
-    2.9433586931115148
-   ],
-   [
-    768,
-    2.841517215814141
-   ],
-   [
-    896,
-    2.7461097191246853
-   ],
-   [
-    1024,
-    2.663339316348081
-   ],
-   [
-    1152,
-    2.5941094375925937
-   ]
-  ],
-  "md5": "1a80469f183a11d050e37e908bc65f75"
- },
- {
-  "name": "F_GDN_Muon_n48_s32",
-  "ok": true,
-  "bytes": 34198,
-  "ratio": 2.9241,
-  "enc_s": 241.4,
-  "dec_s": 241.4,
-  "total_s": 482.8,
-  "bpb": 2.7358,
-  "arch": "gdn"
- },
- {
-  "name": "G_LLM_GPT2_prior_fast",
-  "ok": true,
-  "experimental": false,
-  "config": {
-   "arch": "gpt2-prior",
-   "tokenizer": "gpt2-byte-bpe",
-   "vocab": 50257,
-   "seg": 1000,
-   "scale": 16777216,
-   "batch": "segments-in-lockstep"
+  {
+    "name": "baseline_reference",
+    "ok": true,
+    "bytes": 33276,
+    "ratio": 3.0052,
+    "enc_s": null,
+    "dec_s": null,
+    "total_s": 26.99,
+    "bpb": 2.6619,
+    "arch": "lstm_ref",
+    "curve": [
+      [
+        0,
+        7.2789
+      ],
+      [
+        128,
+        3.7919
+      ],
+      [
+        256,
+        3.3227
+      ],
+      [
+        384,
+        3.0678
+      ],
+      [
+        512,
+        2.9107
+      ],
+      [
+        640,
+        2.7765
+      ],
+      [
+        768,
+        2.6619
+      ]
+    ]
   },
-  "original_bytes": 100000,
-  "bytes": 14249,
-  "compressed_bytes": 14249,
-  "ratio": 7.0178,
-  "bpb": 1.1399,
-  "ntok": 26625,
-  "enc_s": 13.1,
-  "dec_s": 15.5,
-  "total_s": 28.7,
-  "md5": "1a80469f183a11d050e37e908bc65f75",
-  "note": "PRIMARY RESULT. Frozen external GPT-2 prior (fixed constant of the codec, not derived from the input file), byte-level BPE, 1000-token segments predicted in one GPU batch. Lossless MATCH True, MD5-verified. Ratio 7.018, +6.3% time vs baseline (28.7s vs 27.0s). Held-out enwik8: 0.83-0.87 bpb (ratio 9.2-9.7), not contaminated."
- }
+  {
+    "name": "A_LSTM_Adam_n128_s13",
+    "ok": true,
+    "bytes": 33388,
+    "ratio": 2.9951,
+    "enc_s": 11.0,
+    "dec_s": 11.1,
+    "total_s": 22.1,
+    "bpb": 2.6533,
+    "arch": "lstm"
+  },
+  {
+    "name": "B_LSTM_Adam_n48_s32",
+    "ok": true,
+    "bytes": 33074,
+    "ratio": 3.0235,
+    "enc_s": 20.8,
+    "dec_s": 20.9,
+    "total_s": 41.7,
+    "bpb": 2.6444,
+    "arch": "lstm"
+  },
+  {
+    "name": "C_LSTM_Muon_n128_s32",
+    "ok": true,
+    "bytes": 33386,
+    "ratio": 2.9953,
+    "enc_s": 4.0,
+    "dec_s": 4.0,
+    "total_s": 8.0,
+    "bpb": 2.575,
+    "arch": "lstm"
+  },
+  {
+    "name": "D_LSTM_Muon_n48_s32",
+    "ok": true,
+    "bytes": 32153,
+    "ratio": 3.1101,
+    "enc_s": 24.5,
+    "dec_s": 24.6,
+    "total_s": 49.1,
+    "bpb": 2.5466,
+    "arch": "lstm"
+  },
+  {
+    "name": "E_LSTM_Muon_n80_s32_cosine_FINAL",
+    "ok": true,
+    "bytes": 32087,
+    "ratio": 3.1165,
+    "enc_s": 13.1,
+    "dec_s": 13.2,
+    "total_s": 26.3,
+    "bpb": 2.555,
+    "arch": "lstm",
+    "curve": [
+      [
+        0,
+        7.291105187196072
+      ],
+      [
+        128,
+        3.9805175768249375
+      ],
+      [
+        256,
+        3.515678423907843
+      ],
+      [
+        384,
+        3.274094075673941
+      ],
+      [
+        512,
+        3.0817240518084597
+      ],
+      [
+        640,
+        2.9433586931115148
+      ],
+      [
+        768,
+        2.841517215814141
+      ],
+      [
+        896,
+        2.7461097191246853
+      ],
+      [
+        1024,
+        2.663339316348081
+      ],
+      [
+        1152,
+        2.5941094375925937
+      ]
+    ],
+    "md5": "1a80469f183a11d050e37e908bc65f75",
+    "timing_note": "median of 3 interleaved runs: 36.1 s (28.0-38.1), paired ratio 1.77x baseline; see timing_stats.json",
+    "total_s_median": 36.09,
+    "paired_time_ratio": 1.775
+  },
+  {
+    "name": "F_GDN_Muon_n48_s32",
+    "ok": true,
+    "bytes": 34198,
+    "ratio": 2.9241,
+    "enc_s": 241.4,
+    "dec_s": 241.4,
+    "total_s": 482.8,
+    "bpb": 2.7358,
+    "arch": "gdn"
+  },
+  {
+    "name": "G_LLM_GPT2_prior_fast",
+    "ok": true,
+    "experimental": false,
+    "config": {
+      "arch": "gpt2-prior",
+      "tokenizer": "gpt2-byte-bpe",
+      "vocab": 50257,
+      "seg": 1000,
+      "scale": 16777216,
+      "batch": "segments-in-lockstep"
+    },
+    "original_bytes": 100000,
+    "bytes": 14249,
+    "compressed_bytes": 14249,
+    "ratio": 7.0178,
+    "bpb": 1.1399,
+    "ntok": 26625,
+    "enc_s": 13.1,
+    "dec_s": 15.5,
+    "total_s": 28.7,
+    "md5": "1a80469f183a11d050e37e908bc65f75",
+    "note": "PRIMARY RESULT. Frozen external GPT-2 prior (fixed constant of the codec, not derived from the input file), byte-level BPE (UTF-8 fast path with a latin-1 fallback for arbitrary bytes, reversible for all 256 values), 1000-token segments predicted in one GPU batch. Lossless MATCH True, MD5-verified 14249 bytes, ratio 7.0178. Median time 27.1 s vs 18.1 s baseline (paired 1.49x, inside the +50% budget). Held-out enwik8: 0.83-0.87 bpb.",
+    "timing_note": "median of 3 interleaved runs: 27.1 s (26.9-30.1), paired ratio 1.49x baseline; see timing_stats.json",
+    "total_s_median": 27.09,
+    "paired_time_ratio": 1.485
+  }
 ]

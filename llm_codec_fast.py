@@ -13,10 +13,27 @@ from llm_codec import (_tokenizer, VOCAB, MAGIC, cumfreq, GpuFreq, SCALE, SEG)
 from ArithmeticCoder import (ArithmeticEncoder, ArithmeticDecoder,
                              BitOutputStream, BitInputStream)
 
+class PairFreq:
+    """Minimal frequency view: the encoder only reads freqs[-1], freqs[sym-1], freqs[sym]."""
+    __slots__ = ("lo", "hi", "sym")
+
+    def __init__(self, lo: int, hi: int, sym: int):
+        self.lo, self.hi, self.sym = lo, hi, sym
+
+    def __getitem__(self, i: int) -> int:
+        if i == -1:
+            return SCALE  # total: every row's last entry is forced to SCALE
+        if i == self.sym:
+            return self.hi
+        if i == self.sym - 1:
+            return self.lo
+        raise IndexError(i)
+
+
 class LLMCodecFast:
     def __init__(self, seg: int = SEG):
         self.tk = _tokenizer()
-        self.model = __import__('transformers').GPT2LMHeadModel.from_pretrained('gpt2').cuda().eval()
+        self.model = __import__('transformers').GPT2LMHeadModel.from_pretrained('gpt2', attn_implementation='sdpa').cuda().eval()
         self.dev = 'cuda'
         self.seg = seg
         self.uniform = cumfreq(torch.full((VOCAB,), 1.0/VOCAB, device=self.dev))
@@ -32,45 +49,63 @@ class LLMCodecFast:
         # inp[:, k] = token k of each segment; fed to predict token k+1.
         inp = torch.tensor([[(s[k] if k < len(s) else 0) for k in range(T)] for s in segs],
                            device=self.dev, dtype=torch.long)
-        cfs = [[self.uniform] for _ in segs]
+        # Only the two cumulative frequencies the encoder reads are kept:
+        # one gather on the GPU per position, one bulk copy at the end.
+        hi_rows, lo_rows = [], []
         past = None
         with torch.no_grad():
-            for pos in range(1, T):
-                out = self.model(inp[:, pos-1:pos], past_key_values=past, use_cache=True)
-                past = out.past_key_values
-                p = torch.softmax(out.logits[:, -1].float(), dim=-1)  # [B,VOCAB]
-                c = (torch.cumsum(p.double(), dim=-1) * (SCALE - VOCAB)).long() + torch.arange(1, VOCAB+1, device=self.dev)
-                c[:, -1] = SCALE
-                for b in range(B):
-                    if pos < len(segs[b]):
-                        cfs[b].append(c[b])
-        return cfs, segs
+            for pos in range(T):
+                if pos == 0:
+                    # uniform first-symbol prior, no forward (same row the decoder uses)
+                    syms = inp[:, 0]
+                    hi = self.uniform.gather(0, syms)
+                    lo = self.uniform.gather(0, (syms - 1).clamp_min(0)) * (syms > 0)
+                else:
+                    out = self.model(inp[:, pos-1:pos], past_key_values=past, use_cache=True)
+                    past = out.past_key_values
+                    p = torch.softmax(out.logits[:, -1].float(), dim=-1)  # [B,VOCAB]
+                    c = (torch.cumsum(p.double(), dim=-1) * (SCALE - VOCAB)).long() \
+                        + torch.arange(1, VOCAB+1, device=self.dev)
+                    c[:, -1] = SCALE
+                    syms = inp[:, pos]
+                    hi = c.gather(1, syms.unsqueeze(1)).squeeze(1)
+                    lo = c.gather(1, (syms - 1).clamp_min(0).unsqueeze(1)).squeeze(1)
+                    lo = lo * (syms > 0)
+                hi_rows.append(hi)
+                lo_rows.append(lo)
+        hi_cpu = torch.stack(hi_rows).cpu().tolist()   # [T][B]
+        lo_cpu = torch.stack(lo_rows).cpu().tolist()
+        return (lo_cpu, hi_cpu), segs
 
     def compress(self, data: bytes):
         t0 = time.time()
-        ids = self.tk.encode(data.decode('latin1')).ids
-        cfs, segs = self._precompute(ids)
+        try:  # valid UTF-8: tokenize as text (fewer tokens on multibyte chars)
+            text, mode = data.decode('utf8'), 0
+        except UnicodeDecodeError:  # arbitrary bytes: latin-1 is byte-transparent
+            text, mode = data.decode('latin1'), 1
+        ids = self.tk.encode(text).ids
+        (lo_cpu, hi_cpu), segs = self._precompute(ids)
         out = io.BytesIO(); enc = ArithmeticEncoder(32, BitOutputStream(out))
         bits = 0.0
         # write in position-major order (pos 0 of every segment, then pos 1, ...)
         # so arithmetic-coding order matches the decoder.
         for pos in range(max(len(s) for s in segs) if segs else 0):
-            for s, cf in zip(segs, cfs):
+            for b, s in enumerate(segs):
                 if pos >= len(s):
                     continue
                 sym = s[pos]
-                cu = cf[pos]
-                enc.write(GpuFreq(cu), sym)
+                lo, hi = lo_cpu[pos][b], hi_cpu[pos][b]
+                enc.write(PairFreq(lo, hi, sym), sym)
                 if pos > 0:
-                    bits += -math.log2(max(float(cu[sym] - (cu[sym-1] if sym else 0)) / SCALE, 1e-300))
+                    bits += -math.log2(max((hi - lo) / SCALE, 1e-300))
         enc.finish()
         while enc.output.numbitsfilled != 0: enc.output.write(0)
         payload = out.getvalue()
-        frame = MAGIC + struct.pack('>IIII', len(data), len(ids), len(payload), 0) + payload
+        frame = MAGIC + struct.pack('>IIII', len(data), len(ids), len(payload), mode) + payload
         return {'frame': frame, 'bits': bits, 'ntok': len(ids), 'encode_s': time.time()-t0}
 
     def decompress(self, frame: bytes):
-        length, ntok, psz, _ = struct.unpack('>IIII', frame[6:22])
+        length, ntok, psz, mode = struct.unpack('>IIII', frame[6:22])
         payload = frame[22:22+psz]
         t0 = time.time()
         dec = ArithmeticDecoder(32, BitInputStream(io.BytesIO(payload)))
@@ -97,5 +132,6 @@ class LLMCodecFast:
                 if pos < seg_lens[b]:
                     parts[b].append(dec.read(GpuFreq(rows[b])))
         ids = [t for part in parts for t in part]
-        data = self.tk.decode(ids).encode('latin1')[:length]
+        text = self.tk.decode(ids)
+        data = (text.encode('utf8') if mode == 0 else text.encode('latin1'))[:length]
         return {'data': data, 'ntok': len(ids), 'decode_s': time.time()-t0}

@@ -5,3 +5,4 @@ __marimo__/
 *.dat
 *.dat.dec
 bench_inst/
+result.json

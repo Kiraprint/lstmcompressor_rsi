@@ -32,9 +32,14 @@ def cumfreq(p: torch.Tensor) -> torch.Tensor:
     return c
 
 class GpuFreq:
-    def __init__(self, c): self.c=c; self.n=c.numel()
+    def __init__(self, c): self.c=c; self.n=c.numel(); self._cpu=None
     def __len__(self): return self.n
-    def __getitem__(self, i): return int(self.c[i]) if i != -1 else int(self.c[-1])
+    def __getitem__(self, i):
+        # one host transfer per cumulative-frequency row, then pure-CPU indexing
+        if self._cpu is None:
+            # int32 halves the per-symbol host transfer; SCALE = 2**24 fits easily
+            self._cpu=self.c.to(getattr(__import__('torch'),'int32')).cpu()
+        return int(self._cpu[i])
 
 class LLMCodecSeg:
     def __init__(self):
@@ -48,7 +53,11 @@ class LLMCodecSeg:
         return torch.softmax(out.logits[0,-1].float(),dim=-1), out.past_key_values
 
     def compress(self, data: bytes):
-        ids=self.tk.encode(data.decode('latin1')).ids
+        try:  # valid UTF-8: tokenize as text (fewer tokens on multibyte chars)
+            text,mode=data.decode('utf8'),0
+        except UnicodeDecodeError:  # arbitrary bytes: latin-1 is byte-transparent
+            text,mode=data.decode('latin1'),1
+        ids=self.tk.encode(text).ids
         out=io.BytesIO(); enc=ArithmeticEncoder(32,BitOutputStream(out))
         bits=0.0; t0=time.time()
         N=len(ids)
@@ -65,11 +74,11 @@ class LLMCodecSeg:
         enc.finish()
         while enc.output.numbitsfilled!=0: enc.output.write(0)
         payload=out.getvalue()
-        frame=MAGIC+struct.pack('>IIII',len(data),len(ids),len(payload),0)+payload
+        frame=MAGIC+struct.pack('>IIII',len(data),len(ids),len(payload),mode)+payload
         return {'frame':frame,'bits':bits,'ntok':len(ids),'encode_s':time.time()-t0}
 
     def decompress(self, frame: bytes):
-        length,ntok,psz,_=struct.unpack('>IIII',frame[6:22]); payload=frame[22:22+psz]
+        length,ntok,psz,mode=struct.unpack('>IIII',frame[6:22]); payload=frame[22:22+psz]
         dec=ArithmeticDecoder(32,BitInputStream(io.BytesIO(payload)))
         ids=[]; t0=time.time()
         for bs in range(0,ntok,SEG):
@@ -80,5 +89,6 @@ class LLMCodecSeg:
                     p,past=self._step(part[-1],past); cu=cumfreq(p)
                 k=dec.read(GpuFreq(cu)); part.append(k)
             ids.extend(part)
-        data=self.tk.decode(ids).encode('latin1')[:length]
+        text=self.tk.decode(ids)
+        data=(text.encode('utf8') if mode==0 else text.encode('latin1'))[:length]
         return {'data':data,'ntok':len(ids),'decode_s':time.time()-t0}
