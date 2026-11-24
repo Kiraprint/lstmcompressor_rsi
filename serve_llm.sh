@@ -27,7 +27,9 @@ for _ in $(seq 1 60); do
   grep -q "URL:" /tmp/marimo_llm.log && break; sleep 1
 done
 
-"$CF" tunnel --url "http://127.0.0.1:$PORT" --no-autoupdate > /tmp/cf_tunnel.log 2>&1 &
+# http2 поверх TCP/443: QUIC (по умолчанию) режут некоторые мобильные операторы
+"$CF" tunnel --url "http://127.0.0.1:$PORT" --no-autoupdate \
+    --protocol http2 --edge-ip-version 4 > /tmp/cf_tunnel.log 2>&1 &
 CF_PID=$!
 for _ in $(seq 1 60); do
   URL=$(grep -o "https://[a-z0-9-]*\.trycloudflare\.com" /tmp/cf_tunnel.log | head -1) || true
